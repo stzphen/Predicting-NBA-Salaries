@@ -1,0 +1,294 @@
+---
+title: "Predicting NBA Salaries using Multiple Regression"
+author:
+- Stephen Zhong
+date: June 15, 2021
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: 3
+  word_document:
+    toc: yes
+  html_document:
+    code_folding: show
+    theme: cosmo
+    toc: yes
+    toc_float: yes
+    toc_depth: 3
+---
+
+\newpage
+
+# Introduction
+
+In the NBA, when constructing a team, the only thing better than getting talent is getting talent at a good price. With the salary cap changing from year to years, front offices are tasked with building a competitive roster while managing the team payroll. Having spent the past semester learning the fundamentals of R and data analysis, in this project, I plan on using multiple regression to build a model to help predict the estimated value of a player in terms of salary based on his statistics.  
+
+# Preliminaries
+
+## Style Edits
+
+```{r style edits}
+knitr::opts_chunk$set(message = FALSE)
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Necessary Packages
+
+```{r packages}
+library("knitr")
+library("ggplot2")
+library("kableExtra")
+library("readr")
+library("car")
+library("readxl")
+library("grid")
+library("gridExtra")
+library(data.table)
+library(tidyverse)
+```
+
+## Importing and Cleaning Data
+
+The "nbaStats" dataset used data taken from the [Basketball Reference website](https://www.basketball-reference.com/). Contained in the data was their statistics (points, rebounds, etc.), and I added information on their salary and contract. For the project, I decided to look at percent of salary cap, as the NBA salary cap is constantly evolving. The 2020-21 NBA season has the salary cap set at $109.1 million, with next year's being 112.4 million dollars.     
+
+```{r reading excel file}
+nbaStats <- read_excel("nbaStats.xlsx")
+str(nbaStats)  
+```
+
+For cleaning the data, I wanted to limit the statistics only to players who have played more than 18 games (1/4 of the 20-21 season) so their sample size is not too small, and also eliminated certain statistics I knew were redundant or useless. For example, with 2 point percentage  as a statistic, there is no need for 2 points made and 2 points attempted. I also set any numeric stats that are blank to 0, and any type of contract that doesn't fit into one of the given categories as "Other".  
+
+```{r cleaning data}
+nbaStatsCleaned <- subset(nbaStats,
+                          G >= 15,
+                          select = -c(FGM, `2PM`, `3PM`, FTM, `3PA`, `2PA`, ORB, DRB, Tm, Salary, G, FGA, FTA))
+
+nbaStatsCleaned$PTS <- as.numeric(nbaStatsCleaned$PTS)
+nbaStatsCleaned$PTS <- round(nbaStatsCleaned$PTS, digits = 1)
+
+nbaStatsCleaned[c(4:18)][is.na(nbaStatsCleaned[c(4:18)])] <- 0
+nbaStatsCleaned[c(19)][is.na(nbaStatsCleaned[c(19)])] <- "Other"
+```
+
+\newpage
+
+# Exploratory Data Analysis 
+
+For our dataset, we will be looking at all NBA players in the 2020-21 NBA season who played in more than 15 games. The different potential predictors of salary are listed below:
+
+**Pos**: position played  
+**Age**: years of age (as of June 2021)  
+**GS**: number of games started  
+**MP**: minutes played per game  
+**FG**: field goal percentage  
+**3P**: three point field goal percentage  
+**2P**: two point field goal percentage  
+**eFG**: effective field goal percentage (accounts for difference in points of 3P% and 2P%)  
+**FT**: free throw percentage  
+**TRB**: total rebounds per game (offensive and defensive)  
+**AST**: assists per game  
+**STL**: steals per game  
+**BLK**: blocks per game  
+**TOV**: turnovers per game  
+**PTS**: points per game  
+
+Our response variable is also listed below:
+
+**PercentOfCap**: percent of salary cap of player's 2020-21 season salary
+
+## Univariate Analysis
+
+### Response Variable
+
+First, let's took a look at our response variable, which is the percent of cap space. 
+
+```{r}
+ggplot(data = nbaStatsCleaned, aes(PercentOfCap)) + geom_density(aes(y = ..scaled..), color = "blue", fill = "lightblue") 
+
+summary(nbaStatsCleaned$PercentOfCap)
+```
+
+As we can see based on the density plot, the contracts are heavily skewed to the right, with most players having smaller sized contracts, and only a select few having contracts worth a heavy portion of the cap.
+
+### Predictor Variables
+
+Next, let's take a look at all the potential predictor variables.
+
+```{r}
+pts <- ggplot(data = nbaStatsCleaned, aes(PTS)) + geom_density(aes(y = ..scaled..), color = "black", fill = "grey") 
+trb <- ggplot(data = nbaStatsCleaned, aes(TRB)) + geom_density(aes(y = ..scaled..), color = "black", fill = "grey")
+ast <- ggplot(data = nbaStatsCleaned, aes(AST)) + geom_density(aes(y = ..scaled..), color = "black", fill = "grey")
+stl <- ggplot(data = nbaStatsCleaned, aes(STL)) + geom_density(aes(y = ..scaled..), color = "black", fill = "grey")
+blk <- ggplot(data = nbaStatsCleaned, aes(BLK)) + geom_density(aes(y = ..scaled..), color = "black", fill = "grey")
+tov <- ggplot(data = nbaStatsCleaned, aes(TOV)) + geom_density(aes(y = ..scaled..), color = "black", fill = "grey")
+gs <- ggplot(data = nbaStatsCleaned, aes(GS)) + geom_density(aes(y = ..scaled..), color = "black", fill = "grey")
+fg <- ggplot(data = nbaStatsCleaned, aes(`FG`)) + geom_density(aes(y = ..scaled..), color = "black", fill = "grey")
+`3p` <- ggplot(data = nbaStatsCleaned, aes(`3P`)) + geom_density(aes(y = ..scaled..), color = "black", fill = "grey")
+`2p` <- ggplot(data = nbaStatsCleaned, aes(`2P`)) + geom_density(aes(y = ..scaled..), color = "black", fill = "grey")
+efg <- ggplot(data = nbaStatsCleaned, aes(`eFG`)) + geom_density(aes(y = ..scaled..), color = "black", fill = "grey")
+ft <- ggplot(data = nbaStatsCleaned, aes(`FT`)) + geom_density(aes(y = ..scaled..), color = "black", fill = "grey")
+mp <- ggplot(data = nbaStatsCleaned, aes(MP)) + geom_density(aes(y = ..scaled..), color = "black", fill = "grey")
+pf <- ggplot(data = nbaStatsCleaned, aes(PF)) + geom_density(aes(y = ..scaled..), color = "black", fill = "grey")
+age <- ggplot(data = nbaStatsCleaned, aes(Age)) + geom_density(aes(y = ..scaled..), color = "black", fill = "grey")
+
+grid.arrange(pts, trb, ast, stl, blk, tov, gs, fg, `3p`, `2p`, efg, ft, mp, pf, age, ncol = 3)
+```
+
+There's a lot to note with all the different potential predictor variables in our multiple regression model. First and foremost, all distributions are unimodal. As we can see, with a lot of the counting statistics or traditional box score metrics, such as points, rebounds, assists, etc., those are all skewed heavily to the right. This makes sense, as most players are going to be pretty low in counting statistics, while there will be few elite players in each statistical category who have higher numbers.  
+
+In comparison, when looking at percentage based statistics, such as field goal percentage and free throw percentage, these graphs follow a lot more of a normal distribution, with most players hovering around the league average, while some are elite, and others are really bad. You'll notice with 3P% that there is a little spike at 0%, but this is because anyone who did not shoot a three pointer on the season was given 0% in three point percentage. 
+
+## Bivariate Analysis
+
+```{r looking at percent of cap}
+cor(nbaStatsCleaned[c(3:17)], nbaStatsCleaned$PercentOfCap)
+```
+
+As we can see, the order of statistics that have the strongest correlation with PercentOfCap are as follows:
+
+**PTS > FGA > TOV > AST > FTA > MP > STL > TRB > Age > PF > BLK > FT > 3P > 2P**
+
+For the sake of this part, let's take a look at how points per game correlates with percent of cap.
+
+```{r}
+ggplot(data = nbaStatsCleaned, aes(x = PTS, y = PercentOfCap, colour = ContractType)) + geom_point() + labs(x = "Points Per Game", y = "Percent of Cap") + geom_smooth(aes(group = 1), method = "lm", se = FALSE)
+
+cor(nbaStatsCleaned$PTS, nbaStatsCleaned$PercentOfCap)
+```
+
+Interestingly enough, we see that below the regression line, there are a number of players who all have the same contract type, which is 1st round pick. This can be explained as first round picks are signed to rookie deals, and won't have a salary that reflects their actual performance until they are in the league for up to 4 years. In order to account for this, I'll also have a separate dataset called "nonRookieContracts" that looks at all players in the league that are no longer on rookie contracts.
+
+```{r}
+nonRookieContracts <- subset(nbaStatsCleaned,
+                          ContractType != "1st Round Pick")
+
+ggplot(data = nonRookieContracts, aes(x = PTS, y = PercentOfCap, color = ContractType)) + geom_point() + labs(x = "Points Per Game", y = "Percent of Cap") + geom_smooth(aes(group = 1), method = "lm", se = FALSE)
+
+cor(nonRookieContracts$PTS, nonRookieContracts$PercentOfCap)
+```
+
+As we can see, once we remove players still on their rookie contracts, the correlation increases from around .71 to .79. For the rest of this project, we'll focus more on this dataset without rookie contracts instead.
+
+\newpage
+
+# Modeling
+
+First, let's build an initial model for both the nonRookieContracts dataset using all the predictor variables. We will assume our model will be reasonably linear.
+
+```{r preliminary model}
+nonRookieModel <- lm(PercentOfCap ~ Age + MP + GS + eFG + FG + `3P` + `2P` + FT + TRB + AST + STL + BLK + TOV + PF + PTS, data = nonRookieContracts)
+
+summary(nonRookieModel)
+```
+
+As we can see, our multiple R-squared came out to .7816, or 78.16% percent of the variation in percent of cap can be explained by the predictor variables. However, let's also take a look at potential multicollinearity between predictor variables. 
+
+```{r}
+round(cor(nonRookieContracts[c(3:17)]), digits = 2)
+```
+
+Once we run the correlation table, we can see that between certain predictor variables, there are some rather high correlations. This means we are likely going to be dealing with multicollinearity. In order to better understand this, let's took a look at the vif values, or variation inflation factors of this mulitlinear regression model.
+
+```{r vifs for prelim model}
+vif(nonRookieModel)
+```
+
+As we can see, there are a few variables with high vifs, most notably MP, eFG%, FG%, AST, TOV, and PTS. However, a lot of these make sense. For FG% and eFG%, they measure the same thing (shooting efficiency), but with slightly different calculations. As a result, we'll likely remove all shooting efficiency metrics except eFG%, as it takes into account 3P% and 2P%, and FT%.
+
+We also see that MP has a pretty high vif value. This also makes sense, as more minutes played means that there will be an increase in your other counting statistics, such as rebounds, assists, and points. As a result, we don't really need MP as a variable.
+
+Finally, assists and turnovers have high vifs. Oftentimes, in basketball, analysts look at assist to turnover ratio, as that indicates not only if a player is good at getting assists, but also whether they can get them efficiently. In order to account for this, I plan to add an assist to turnover ratio statistic, and use that in the new model.
+
+## Making a New Model with No Multicollinearity
+
+Using the modifications I suggested above, let's make a new model, and hope to find reasonable vif values.
+
+```{r new model}
+nonRookieContracts$ASTtoTOV <- (nonRookieContracts$AST / nonRookieContracts$TOV)
+
+newModel <- lm(PercentOfCap ~ Age + GS + eFG + FT + TRB + AST + ASTtoTOV + STL + BLK + PF + PTS, data = nonRookieContracts)
+
+summary(newModel)
+```
+
+As we can see, our R-squared went down slightly from .7816 to .7674, but that change is small. Let's check the variation inflation factors again.
+
+```{r vifs for new model}
+vif(newModel)
+```
+
+As we can see, this time, we have no vif value over 5, which is a good sign, meaning that multicollinearity is no longer an issue. This model seems to do a pretty good job of predicting percent of salary cap, as 76.74% of variation in percent of cap is predicted by our predictor variables. Let's lastly take a look at the residual plots to make sure those conditions are satisfied.
+
+```{r checking residuals graph}
+plot(newModel, which = 1)
+plot(newModel, which = 2)
+```
+
+As we can see in the residuals plot, the red line does not follow straight across perfectly, as it deviates from the middle near the beginning and end, but overall is in the middle. In the normal qq-plot, we can see that the same deviation near the beginning and end occur. However, it follows nicely along the middle, so we can confidently say that the residual conditions have been satisfied.
+
+This now means that our model we built earlier is valid. As we can see in the summary, all variables except steals, blocks, and free throw percentage are statistically significant. Surprisingly, effective field goal percentage, assist to turnover ratio, and steals all have negative coefficients, suggesting that having lower stats in these categories leads to a higher percentage of cap. However, while this is weird and intuitively seems wrong, most other coefficients are positive. 
+
+\newpage
+
+# Making Predictions Using Our Model
+
+Building a model is pointless if it can't be used. Below, I made a function named "salaryPrediction" that will take counting statistics in and produce the percent of salary cap.
+
+```{r}
+salaryPrediction <- function(model, player, Age, GS, eFG, FT, TRB, AST, ASTtoTOV, STL, BLK, PF, PTS){
+  predictionDataFrame = data.frame(Age, GS, eFG, FT, TRB, AST, ASTtoTOV, STL, BLK, PF, PTS)
+  predictedSalary <- predict(model, predictionDataFrame)
+  print(paste(player, ":", format(predictedSalary)))
+}
+```
+
+## Testing the Model
+
+Now, let's test it on a few notable players.
+
+First up, let's look at Luka Doncic. Because he was on his rookie contract, his statistics were not accounted for in the model we built. Luka just finished his third year in the NBA, is viewed as arguably the brightest young star in the league, and because of back to back All-NBA first teams, is eligible for a rookie-scale supermax, which is a 5 year extension that pays him 30% of the salary cap.
+
+```{r}
+salaryPrediction(newModel, "Luka Doncic", 21, 66, 0.550, 0.730, 8.0, 8.6, 2, 1.0, 0.5, 2.3, 27.7)
+```
+
+As seen above, our model almost perfectly predicts Luka Doncic being worth 30% of the salary cap, although most people would argue he is worth even more based on his potential.
+
+Let's take another look at another interesting case: Mikal Bridges. Mikal also just finished his third year in the NBA, making him eligible for an extension, and has played a huge role in helping the Phoenix Suns in their current playoff run that is still going on as of the dat of me writing this. Mikal is a 3 and D player, and while his statistics may not pop off the chart, his value is undeniable, and experts see him signing a contract up to 20 million and maybe even more based on his growth and potential for continual growth.
+
+```{r}
+salaryPrediction(newModel, "Mikal Bridges", 24, 72, 0.643, 0.84, 4.3, 2.1, 2.62, 1.1, 0.9, 1.6, 13.5)
+```
+
+Our model predicts that Bridges is worth around 10.4% of the salary cap, or somewhere around 12 million annually. Any analyst would see a contract like that for a player like Bridges as an absolute steal. Our model likely falls short because it cannot take into account Bridges's impact on the defensive end, along with his potential for growth.
+
+Finally, let's take a look at Kyle Lowry, a 35 year old veteran point guard who has played at an all-star level for 6-7 years. Known for his hard-nosed defense, reliable scorer, and veteran leadership, he is valued highly around the league. However, due to his rising age and injuries, teams may be more reluctant to sign him to a longer and larger contract as he enters free agency this offseason (The Basketball Reference website has his age at 34).
+
+```{r}
+salaryPrediction(newModel, "Kyle Lowry", 34, 46, 0.546, 0.875, 5.4, 7.3, 2.7, 1.0, 0.3, 3.1, 17.2)
+```
+
+Our model predicts Lowry is worth around 22% of the salary cap, or assuming the 112.4 salary cap for the 2021-22 season, 24.7 million dollars annually. While that might be considered expensive by some for an aging point guard, his level of play and leadership may lead a contending team to offer him that type of money, if not even more.
+
+# Shortcomings
+
+Our model, despite being somehwat accurate, and fitted to account for around 77% of the variability in percent of cap, is not perfect. Numbers can only help in so many ways, and there are a nunber of shortcomings that our model has.
+
+*1. Playoff Production*
+
+While regular season production is important, playoff production often can lead to a player having their stock boosted or being frowned upon. For example, Ben Simmons in the regular season was productive, but due to his playoff shortcomings, is likely not viewed as the same level of player as he was before.
+
+*2. No Potential/Historical Context*
+
+When viewing younger players, teams often offer contracts not only based on the level of play they currently are at, but the potential that they could be something much greater. A good example was Mikal Bridges, as seen above. Additionally, previous seasons was not taken into account, such as whether or not their success was sustained, whether or not the had injuries in the past, and whether or not they have followed a steady growth and are looking to continue to grow.
+
+*3. Purely Statistical*
+
+Finally, and perhaps most obviously, the model is purely statistical. Looking at numbers alone is no way to determine a player's worth, as many players often provide much more off the court and things that can't be easily tracked, such as their defense, leadership, or IQ.
+
+# Final Discussion
+
+In this project, using multiple regression, we were able to construct a working model that helped predict player's salary based on their statistical performance. However, it is important to note that while our model seems to work fairly well, it is far from perfect, and has many potential downfalls.
+
+Regardless, this project was fun to build, and definitely is interesting to take a look at. It'll be interesting to see how players are paid in this upcoming offseason and see how well my model fares.
